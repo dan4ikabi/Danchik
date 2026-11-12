@@ -175,7 +175,11 @@ table.ag{border-collapse:separate;border-spacing:0;font-size:13.5px;min-width:10
 .opt b{display:block;font-weight:600}
 .opt small{color:var(--ink-3);font-size:12.5px}
 .toast{position:fixed;left:50%;bottom:90px;transform:translateX(-50%);background:var(--ink);color:var(--bg);padding:11px 18px;border-radius:12px;font-size:14px;font-weight:500;z-index:60;box-shadow:var(--shadow);display:none;max-width:90vw}
-.toast.on{display:block}
+.toast.on{display:flex;align-items:center;gap:14px}
+.toast button{background:none;border:0;color:inherit;font-weight:700;text-decoration:underline;padding:0}
+.xbtn{width:30px;height:30px;border-radius:9px;border:1px solid var(--line);background:var(--surface);color:var(--crit);font-size:17px;line-height:1;flex:none;display:inline-grid;place-items:center;padding:0}
+.xbtn:hover{border-color:var(--crit);background:var(--crit-soft)}
+.paidl{display:flex;align-items:center;gap:8px;margin-top:6px;flex-wrap:wrap}
 .fab{position:fixed;right:18px;bottom:calc(78px + env(safe-area-inset-bottom));width:56px;height:56px;border-radius:18px;background:var(--accent);color:var(--accent-ink);border:0;display:none;place-items:center;box-shadow:0 10px 26px -8px color-mix(in srgb,var(--accent) 70%,transparent);z-index:20}
 .fab svg{width:26px;height:26px;stroke:currentColor;stroke-width:2.2;fill:none;stroke-linecap:round}
 .mnav{display:none}
@@ -398,7 +402,9 @@ const ico=(k,cls='ico')=>`<svg class="${cls}" viewBox="0 0 24 24">${ICON[k]}</sv
 const BANKS={K:{name:'Kaspi Gold',short:'Kaspi',color:'var(--kaspi)'},F:{name:'Freedom',short:'Freedom',color:'var(--freedom)'},H:{name:'Halyk',short:'Halyk',color:'var(--halyk)'},C:{name:'Қолма-қол',short:'Қолма-қол',color:'var(--cash)'}};
 const bb=(b,s)=>`<span class="bb${s?' s':''}" style="background:${BANKS[b].color}">${b==='C'?'₸':BANKS[b].short[0]}</span>`;
 const VIA=[['C','Қолма-қол'],['K','Kaspi'],['F','Freedom'],['H','Halyk']];
-let toastT;function toast(m){const t=$('#toast');t.textContent=m;t.classList.add('on');clearTimeout(toastT);toastT=setTimeout(()=>t.classList.remove('on'),2600)}
+let toastT;function toast(m,undo){const t=$('#toast');t.innerHTML='<span></span>';t.firstChild.textContent=m;if(undo){const b=document.createElement('button');b.type='button';b.textContent='Қайтару';b.onclick=()=>{t.classList.remove('on');undo()};t.appendChild(b)}t.classList.add('on');clearTimeout(toastT);toastT=setTimeout(()=>t.classList.remove('on'),undo?6000:2600)}
+function undoable(label,fn){const snap=JSON.stringify(S.book);fn();saveBook();rebuild();render();toast(label,()=>{closeSheet();S.book=JSON.parse(snap);saveBook();rebuild();render();toast('Қайтарылды')})}
+const viaName=v=>v==='C'?'қолма-қол':(BANKS[v]?BANKS[v].short:'');
 
 /* ================= state & storage ================= */
 const DEFAULT_BOOK=()=>({v:2,salary:576000,usdRate:445,
@@ -440,6 +446,7 @@ async function pushBanks(onlyBanks){if(!DB)return;const col=DB.collection('data/
     if(onlyBanks&&!onlyBanks.includes(b))continue;
     for(const m of ms){const rr=rows.filter(r=>r.d.startsWith(m)).map(r=>[r.d,r.a,r.ccy,r.op,r.det,r.opAmt??null]);await col.doc('m_'+b+'_'+m).set({rows:rr})}}
   await col.doc('meta').set(md)}
+function syncBanks(removed,b){if(!DB)return;saving=saving.then(async()=>{const col=DB.collection('data/users/'+UID);if(removed){for(const m of monthsOf(removed.rows))await col.doc('m_'+b+'_'+m).delete()}await pushBanks(removed?[]:[b])}).catch(e=>console.warn(e))}
 async function pushBook(){if(!DB)return;await DB.collection('data/users/'+UID).doc('book').set(JSON.parse(JSON.stringify(S.book)))}
 function saveBook(){lsSet();if(!DB)return;clearTimeout(bookTimer);bookTimer=setTimeout(()=>{saving=saving.then(pushBook).then(()=>setSync('ok','Аккаунтта сақталған')).catch(e=>{console.warn(e);setSync('local','Сақталмады, қайта көріңіз')})},600)}
 async function pushAll(){try{await pushBanks();await pushBook()}catch(e){console.warn(e);setSync('local','Тек осы құрылғыда')}}
@@ -453,7 +460,7 @@ function rebuild(){
   for(const b of ['K','F','H']){const st=S.banks[b];if(!st)continue;const seen={};
     const hasFB=st.rows.some(r=>r.ccy==='USD'&&/FACEBK/.test(r.det));
     for(const r of st.rows){
-      const base=b+'|'+r.d+'|'+r.a+'|'+r.det;seen[base]=(seen[base]||0);const id=base+'|'+seen[base]++;
+      const base=b+'|'+r.d+'|'+r.a+'|'+r.det;seen[base]=(seen[base]||0);const id=base+'|'+seen[base]++;const OV=S.book.tags[id]||{};if(OV.hidden)continue;
       let a=r.a,c,s='',t=clean(r.det),pending=false,raw=r;const op=r.op||'',det=r.det||'';
       if(b==='H'&&r.ccy==='USD'){if(/FACEBK/.test(det)){const m=r.d.slice(0,7);FBUSD[m]=(FBUSD[m]||0)-r.a}continue}
       if(r.ccy==='USD')a=Math.round(r.a*rate*100)/100;
@@ -485,7 +492,7 @@ function rebuild(){
         else if(/комиссия/i.test(det))c='Комиссия';
         else c=a>0?'Басқа кіріс':'Сатып алу';
       }
-      out.push({id,b,d:r.d,a,c,s,t,pending,raw});
+      if(OV.a!=null)a=OV.a;if(OV.t)t=OV.t;if(OV.confirmed)pending=false;out.push({id,b,d:r.d,a,c,s,t,pending,raw,edited:OV.a!=null||!!OV.t});
     }
   }
   // match own transfers between banks
@@ -497,8 +504,14 @@ function rebuild(){
     const tg=S.book.tags[x.id];if(tg){if(tg.c)x.c=tg.c;if(tg.s)x.s=tg.s}}
   out.sort((p,q)=>q.d.localeCompare(p.d)||Math.abs(q.a)-Math.abs(p.a));
   TX=out;TXI={};out.forEach(x=>TXI[x.id]=x);
+  if(syncLinks())saveBook();
   linkIndex();
 }
+function syncLinks(){let ch=false;const B=S.book;
+  B.events.forEach(e=>e.items.forEach(i=>{const t=i.txId&&TXI[i.txId];if(!t)return;const a=Math.abs(t.a),dir=t.a>0?'in':'out';if(i.a!==a||i.d!==t.d||i.dir!==dir){i.a=a;i.d=t.d;i.dir=dir;ch=true}}));
+  B.claims.forEach(c=>{if(c.txIds.length===1){const t=TXI[c.txIds[0]];if(t&&t.a<0&&c.total!==-t.a){c.total=-t.a;ch=true}if(t&&c.date!==t.d){c.date=t.d;ch=true}}
+    c.people.forEach(p=>{const cnt={};p.paid.forEach(q=>{if(q.txId)cnt[q.txId]=(cnt[q.txId]||0)+1});p.paid.forEach(q=>{const t=q.txId&&TXI[q.txId];if(!t||cnt[q.txId]>1)return;const other=sum(p.paid.filter(x=>x!==q));const a=Math.max(0,Math.min(t.a,p.amount-other));if(q.a!==a||q.d!==t.d){q.a=a;q.d=t.d;ch=true}})})});
+  return ch}
 let LINK={};
 function linkIndex(){LINK={};const B=S.book;
   B.claims.forEach(c=>{c.txIds.forEach(id=>LINK[id]={k:'claim',ref:c.id,label:'Қайтарылады'});c.people.forEach(p=>p.paid.forEach(q=>{if(q.txId)LINK[q.txId]={k:'repay',ref:c.id,label:'Қайтарым: '+p.name}}))});
@@ -544,7 +557,7 @@ function navBuild(){
   $('#nav').innerHTML=VIEWS.map(([k,l])=>`<a href="#${k}" data-v="${k}">${ico(k)}${l}<span class="badge" data-badge="${k}"></span></a>`).join('');
   $('#mnav').innerHTML=MOB.map(k=>{const l=k==='more'?'Тағы':VIEWS.find(v=>v[0]===k)[1];return `<a href="#${k}" data-v="${k}">${ico(k)}${l==='Операциялар'?'Операция':l==='Қайтарылатын'?'Қайтарым':l}</a>`}).join('');
 }
-function route(){const h=location.hash.slice(1);view=VIEWS.some(v=>v[0]===h)||h==='more'?h:'home';render();window.scrollTo(0,0)}
+function route(){closeSheet();const h=location.hash.slice(1);view=VIEWS.some(v=>v[0]===h)||h==='more'?h:'home';render();window.scrollTo(0,0)}
 window.addEventListener('hashchange',route);
 
 /* ================= sheets ================= */
@@ -586,6 +599,7 @@ function vHome(){
 function insights(){const out=[];const M=money();const cm=curMonth();
   if(M.own<0)out.push(['crit','Бөтен ақшадан '+fmt(-M.own,false)+' жетпейді','Жалақы түскенде алдымен осы соманы айлық шотына салыңыз.']);
   const late=S.book.bills.filter(b=>billStatus(b,cm).st==='late');if(late.length)out.push(['crit','Мерзімі өткен төлем: '+late.map(b=>b.name).join(', '),'Төлеген болсаңыз, «Төлемдер» бөлімінде белгілеңіз.']);
+  const pn=TX.filter(t=>t.pending).length;if(pn)out.push(['warn',pn+' операция банкте әлі расталмаған','«Операциялар» бөлімінде «Расталмаған» сүзгісін басып, растаңыз не түзетіңіз.']);
   const sug=suggestions();if(sug.length)out.push(['accent',sug.length+' аударым қайтарымға ұқсайды','«Қайтарылатын» бөлімінде растаңыз.']);
   const last30=TX.filter(t=>t.s==='Кафе, тәтті'&&(new Date(todayISO())-new Date(t.d))/864e5<=30);const cafe=-sum(last30);if(cafe>50000)out.push(['warn','Соңғы 30 күнде кафеге '+fmt(cafe,false),'Бөлісіп қайтарылғаны есептелмеген. Бөліскен төлемді «Қайтарылатын» деп белгілесеңіз, нақты үлесіңіз көрінеді.']);
   const sal=S.book.salary,bt=sum(S.book.bills,b=>b.amount);if(sal&&bt/sal>0.8)out.push(['warn','Міндетті төлемдер жалақының '+Math.round(bt/sal*100)+'%-ы','Тұрақты жалақыдан міндеттіден кейін '+fmt(sal-bt,false)+' қалады.']);
@@ -601,21 +615,28 @@ function vTx(){const cats=[...new Set(TX.map(t=>t.c))].sort();
     <select class="select" id="fCat" aria-label="Санат"><option value="all">Барлық санат</option>${cats.map(c=>`<option ${TXF.c===c?'selected':''}>${esc(c)}</option>`).join('')}</select></div>
     <div class="tools" style="margin-bottom:6px"><div class="chips" id="fBank">${[['all','Барлығы'],['K','Kaspi'],['F','Freedom'],['H','Halyk']].map(([k,l])=>`<button class="chip" type="button" data-b="${k}" aria-pressed="${TXF.b===k}">${l}</button>`).join('')}</div>
     <div class="seg" id="fDir">${[['all','Барлығы'],['in','Кіріс'],['out','Шығыс']].map(([k,l])=>`<button type="button" data-d="${k}" aria-pressed="${TXF.dir===k}">${l}</button>`).join('')}</div>
-    <label class="chip" style="cursor:pointer"><input type="checkbox" id="fOwn" ${TXF.hideOwn?'checked':''}> Өз шоттар арасын жасыру</label></div>
+    <label class="chip" style="cursor:pointer"><input type="checkbox" id="fOwn" ${TXF.hideOwn?'checked':''}> Өз шоттар арасын жасыру</label>
+    ${Object.values(S.book.tags).some(x=>x.hidden)?`<button class="chip" type="button" id="fHid">Өшірілген: ${Object.values(S.book.tags).filter(x=>x.hidden).length}</button>`:''}
+    ${TX.some(t=>t.pending)?`<button class="chip" type="button" id="fPend" aria-pressed="${!!TXF.pend}" style="border-color:var(--warn);color:var(--warn)">Расталмаған: ${TX.filter(t=>t.pending).length}</button>`:''}</div>
     <div id="txOut"></div></div>`}
-function txFiltered(){const q=TXF.q.trim().toLowerCase();return TX.filter(t=>(TXF.b==='all'||t.b===TXF.b)&&(TXF.c==='all'||t.c===TXF.c)&&(TXF.dir==='all'||(TXF.dir==='in'?t.a>0:t.a<0))&&(!TXF.hideOwn||t.c!=='Өз шоттары арасында'||TXF.c==='Өз шоттары арасында')&&(!q||(t.t+' '+t.c+' '+t.s+' '+(t.raw.det||'')).toLowerCase().includes(q)))}
+function txFiltered(){const q=TXF.q.trim().toLowerCase();return TX.filter(t=>(!TXF.pend||t.pending)&&(TXF.b==='all'||t.b===TXF.b)&&(TXF.c==='all'||t.c===TXF.c)&&(TXF.dir==='all'||(TXF.dir==='in'?t.a>0:t.a<0))&&(!TXF.hideOwn||t.c!=='Өз шоттары арасында'||TXF.c==='Өз шоттары арасында')&&(!q||(t.t+' '+t.c+' '+t.s+' '+(t.raw.det||'')).toLowerCase().includes(q)))}
 function renderTx(){const f=txFiltered();const i=sum(f.filter(t=>t.a>0)),o=sum(f.filter(t=>t.a<0));
-  $('#txOut').innerHTML=`<div class="chips" style="margin:10px 0 4px;font-size:13px;color:var(--ink-2);gap:14px"><span>Табылды: <b class="num">${f.length}</b></span><span>Кіріс: <b class="num pos">${fmt(i,true)}</b></span><span>Шығыс: <b class="num">${fmt(o,true)}</b></span></div>${txList(f.slice(0,TXF.lim),true)}${f.length>TXF.lim?`<button class="btn sec block" id="more" type="button" style="margin-top:12px">Тағы ${Math.min(80,f.length-TXF.lim)} операция</button>`:''}`;
-  const m=$('#more');if(m)m.onclick=()=>{TXF.lim+=80;renderTx()}}
+  $('#txOut').innerHTML=(TXF.pend&&f.length?`<div class="card" style="box-shadow:none;background:var(--warn-soft);border-color:transparent;margin-top:10px;display:flex;flex-wrap:wrap;gap:10px;align-items:center;justify-content:space-between"><span style="font-size:13.5px">Бұлар банк растамаған операциялар. Әрқайсысын басып түзетуге не барлығын бірден растауға болады.</span><button class="btn sm" type="button" id="confAll">${ico('check')}Барлығын растау (${f.length})</button></div>`:'')+`<div class="chips" style="margin:10px 0 4px;font-size:13px;color:var(--ink-2);gap:14px"><span>Табылды: <b class="num">${f.length}</b></span><span>Кіріс: <b class="num pos">${fmt(i,true)}</b></span><span>Шығыс: <b class="num">${fmt(o,true)}</b></span></div>${txList(f.slice(0,TXF.lim),true)}${f.length>TXF.lim?`<button class="btn sec block" id="more" type="button" style="margin-top:12px">Тағы ${Math.min(80,f.length-TXF.lim)} операция</button>`:''}`;
+  const m=$('#more');if(m)m.onclick=()=>{TXF.lim+=80;renderTx()};
+  const ca=$('#confAll');if(ca)ca.onclick=()=>{const ids=f.map(t=>t.id);undoable(ids.length+' операция расталды',()=>{ids.forEach(i=>{S.book.tags[i]={...(S.book.tags[i]||{}),confirmed:true}})});TXF.pend=false;render()}}
 function bindTx(){let to;$('#q').oninput=e=>{clearTimeout(to);to=setTimeout(()=>{TXF.q=e.target.value;TXF.lim=80;renderTx()},150)};$('#fCat').onchange=e=>{TXF.c=e.target.value;TXF.lim=80;renderTx()};
   $('#fBank').onclick=e=>{const b=e.target.closest('button');if(!b)return;TXF.b=b.dataset.b;$$('#fBank button').forEach(x=>x.setAttribute('aria-pressed',x===b));renderTx()};
   $('#fDir').onclick=e=>{const b=e.target.closest('button');if(!b)return;TXF.dir=b.dataset.d;$$('#fDir button').forEach(x=>x.setAttribute('aria-pressed',x===b));renderTx()};
-  $('#fOwn').onchange=e=>{TXF.hideOwn=e.target.checked;renderTx()};renderTx()}
+  $('#fOwn').onchange=e=>{TXF.hideOwn=e.target.checked;renderTx()};const fh=$('#fHid');if(fh)fh.onclick=()=>{const ids=Object.keys(S.book.tags).filter(k=>S.book.tags[k].hidden);openSheet(`<h3>Өшірілген операциялар</h3><div class="sub">Қате өшірілсе, қайтарыңыз</div><div class="list">${ids.map(k=>{const p=k.split('|');return `<div class="row">${bb(p[0],1)}<div><div class="t1">${esc(p[3])}</div><div class="t2">${dfmt(p[1])}</div></div><div style="display:flex;gap:8px;align-items:center"><b class="num">${fmt(+p[2],true)}</b><button class="btn sm sec" type="button" data-rs="${esc(k)}">Қайтару</button></div></div>`}).join('')}</div>`,el=>el.querySelectorAll('[data-rs]').forEach(b=>b.onclick=()=>{closeSheet();undoable('Операция қайтарылды',()=>{const tg=S.book.tags[b.dataset.rs];delete tg.hidden})}))};const fp=$('#fPend');if(fp)fp.onclick=()=>{TXF.pend=!TXF.pend;fp.setAttribute('aria-pressed',TXF.pend);renderTx()};renderTx()}
 
 /* ---- transaction sheet ---- */
 function txSheet(id){const t=TXI[id];if(!t)return;const L=LINK[id];
   const subs=SUBS.map(s=>s[0]).concat(['Басқа дүкендер']);
-  openSheet(`<h3>${fmt(t.a,true)}</h3><div class="sub">${esc(t.t)} · ${dfmt(t.d)} · ${BANKS[t.b].name}${t.pending?' · расталмаған':''}</div>
+  const tg0=S.book.tags[id]||{};
+  openSheet(`<h3>${fmt(t.a,true)}</h3><div class="sub">${esc(t.t)} · ${dfmt(t.d)} · ${BANKS[t.b].name}${t.edited?' · <span class="tag acc">түзетілген</span>':''}</div>
+    ${t.pending?`<div class="card" style="box-shadow:none;background:var(--warn-soft);border-color:transparent;padding:14px 16px;margin-bottom:14px"><b class="warnc">Банк әлі растамаған</b><div style="font-size:13.5px;color:var(--ink-2);margin-top:4px">Сома дұрыс болса, «Растау» басыңыз. Өзгерсе, төменде түзетіп, сосын растаңыз. Операция болмай қалса (бас тартылса), «Болмады» басыңыз.</div>
+      <div class="grid g2" style="gap:8px;margin-top:12px"><button class="btn" type="button" id="tconf">${ico('check')}Растау</button><button class="btn danger" type="button" id="tnone">Болмады, өшіру</button></div></div>`:''}
+    <div class="fgrid" style="margin-bottom:12px"><div class="field"><label for="ta">Сома</label><input class="input" id="ta" inputmode="decimal" value="${t.a}"></div><div class="field"><label for="tt">Атауы</label><input class="input" id="tt" value="${esc(t.t)}"></div></div>
     <div class="fgrid"><div class="field"><label for="tc">Санат</label><select class="select" id="tc">${[...new Set(TX.map(x=>x.c).concat(['Сатып алу','Адамдарға','Адамдардан','Өз шоттары арасында']))].sort().map(c=>`<option ${c===t.c?'selected':''}>${esc(c)}</option>`).join('')}</select></div>
     <div class="field"><label for="ts">Түрі</label><select class="select" id="ts"><option value="">—</option>${subs.map(s=>`<option ${s===t.s?'selected':''}>${s}</option>`).join('')}</select></div></div>
     ${L?`<p class="note">Байланысты: <b>${esc(L.label)}</b></p>`:''}
@@ -623,13 +644,19 @@ function txSheet(id){const t=TXI[id];if(!t)return;const L=LINK[id];
     ${t.a>0?`<button class="opt" type="button" data-act="repay"><span class="oi">${ico('hand')}</span><div><b>Бұл маған қайтарылған ақша</b><small>Қайтарылатын тізімнен біреуін жабу</small></div></button>`:''}
     <button class="opt" type="button" data-act="event"><span class="oi">${ico('star')}</span><div><b>Іс-шара ақшасына жатқызу</b><small>${t.a>0?'Іс-шараға жиналған ақша':'Іс-шараға жұмсалған ақша'}</small></div></button>
     ${t.a>0?`<button class="opt" type="button" data-act="aylyq"><span class="oi">${ico('funds')}</span><div><b>Айлыққа берілген ақша</b><small>Картаға аударылған айлық үлесі</small></div></button>`:''}
+    ${S.book.tags[t.id]?`<button class="opt" type="button" data-act="untag"><span class="oi" style="background:var(--surface-2);color:var(--ink-2)">↺</span><div><b>Бастапқы қалпына қайтару</b><small>Сома, атау, санат түзетулерін алып тастау</small></div></button>`:''}
     ${L?`<button class="opt" type="button" data-act="unlink"><span class="oi" style="background:var(--crit-soft);color:var(--crit)">×</span><div><b>Байланысты алып тастау</b><small>${esc(L.label)}</small></div></button>`:''}</div>
     <div class="acts"><button class="btn sec" type="button" data-close>Жабу</button><button class="btn" type="button" id="tsave">Сақтау</button></div>`,el=>{
     el.querySelector('[data-close]').onclick=closeSheet;
-    el.querySelector('#tsave').onclick=()=>{const c=el.querySelector('#tc').value,s=el.querySelector('#ts').value;S.book.tags[id]={c,s};saveBook();rebuild();closeSheet();render();toast('Сақталды')};
-    el.querySelectorAll('[data-act]').forEach(b=>b.onclick=()=>{const a=b.dataset.act;if(a==='claim')claimForm({tx:t});if(a==='repay')repayPick(t);if(a==='event')eventPick(t);if(a==='aylyq')aylyqFromTx(t);if(a==='unlink')unlink(t)});
+    const collect=(extra)=>{const tg={...(S.book.tags[id]||{})};const c=el.querySelector('#tc').value,s=el.querySelector('#ts').value;if(c!==t.c)tg.c=c;if(s&&s!==t.s)tg.s=s;
+      const a=num(el.querySelector('#ta').value),tt=el.querySelector('#tt').value.trim();if(a&&Math.abs(a-t.a)>0.001)tg.a=a;if(tt&&tt!==t.t)tg.t=tt;return Object.assign(tg,extra||{})};
+    const commit=(tg,msg)=>{closeSheet();undoable(msg,()=>{S.book.tags[id]=tg})};
+    el.querySelector('#tsave').onclick=()=>commit(collect(),LINK[id]?'Сақталды, байланысты жазбалар да жаңарды':'Сақталды');
+    const cf=el.querySelector('#tconf');if(cf)cf.onclick=()=>commit(collect({confirmed:true}),'Расталды');
+    const nn=el.querySelector('#tnone');if(nn)nn.onclick=()=>commit({...(S.book.tags[id]||{}),hidden:true},'Операция өшірілді');
+    el.querySelectorAll('[data-act]').forEach(b=>b.onclick=()=>{const a=b.dataset.act;if(a==='claim')claimForm({tx:t});if(a==='repay')repayPick(t);if(a==='event')eventPick(t);if(a==='aylyq')aylyqFromTx(t);if(a==='unlink')unlink(t);if(a==='untag'){closeSheet();undoable('Санат бастапқы қалпына келді',()=>{delete S.book.tags[t.id]})}});
   })}
-function unlink(t){const B=S.book;B.claims.forEach(c=>{c.txIds=c.txIds.filter(x=>x!==t.id);c.people.forEach(p=>p.paid=p.paid.filter(q=>q.txId!==t.id))});B.events.forEach(e=>e.items=e.items.filter(i=>i.txId!==t.id));saveBook();linkIndex();closeSheet();render();toast('Байланыс алынды')}
+function unlink(t){closeSheet();undoable('Байланыс алынды',()=>{const B=S.book;B.claims.forEach(c=>{c.txIds=c.txIds.filter(x=>x!==t.id);c.people.forEach(p=>p.paid=p.paid.filter(q=>q.txId!==t.id))});B.events.forEach(e=>e.items=e.items.filter(i=>i.txId!==t.id))})}
 
 /* ---- claims ---- */
 let CV='people';
@@ -690,13 +717,14 @@ function claimForm(o){const t=o.tx;const type=o.type||(t&&/Билет|UBER|Aviat
 function personSheet(name){const items=[];S.book.claims.forEach(c=>c.people.forEach(p=>{if(p.name===name)items.push({c,p})}));const left=items.reduce((s,x)=>s+Math.max(0,x.p.amount-sum(x.p.paid)),0);
   const key=name.toLowerCase().split(/[\s.]+/)[0].slice(0,4);const used=new Set(Object.keys(LINK));const cands=key.length>=3?TX.filter(t=>t.a>0&&t.c==='Адамдардан'&&!used.has(t.id)&&t.t.toLowerCase().startsWith(key)).slice(0,6):[];
   openSheet(`<h3>${esc(name)}</h3><div class="sub">Қайтаруы керек: <b>${fmt(left,false)}</b></div>
-  <div class="list">${items.map(({c,p},i)=>{const l=p.amount-sum(p.paid);return `<div class="row"><span class="bb s" style="background:var(--accent)">${c.type[0]}</span><div><div class="t1">${esc(c.title)}</div><div class="t2">${dfmt(c.date)} · ${fmt(p.amount,false)}${p.paid.length?' · қайтарды '+fmt(sum(p.paid),false):''}</div></div><div>${l<1?'<span class="pill p-pos">Қайтарды</span>':`<button class="btn sm" type="button" data-pay="${i}">Қайтарды</button>`}</div></div>`}).join('')}</div>
+  <div class="list">${items.map(({c,p},i)=>{const l=p.amount-sum(p.paid);return `<div class="row"><span class="bb s" style="background:var(--accent)">${c.type[0]}</span><div><div class="t1">${esc(c.title)}</div><div class="t2">${dfmt(c.date)} · ${fmt(p.amount,false)}</div>${p.paid.map((q,j)=>`<div class="paidl"><span class="tag pos">+${fmt(q.a,false)} · ${dshort(q.d)} · ${viaName(q.via)}</span><button class="xbtn" type="button" data-unpay="${i}:${j}" aria-label="Қайтарымды өшіру">×</button></div>`).join('')}</div><div>${l<1?'<span class="pill p-pos">Қайтарды</span>':`<button class="btn sm" type="button" data-pay="${i}">Қайтарды</button>`}</div></div>`}).join('')}</div>
   ${cands.length?`<p class="note" style="margin-top:14px"><b>Осы адамнан түскен аударымдар:</b> біреуін басып, қайтарым ретінде тіркеуге болады.</p><div class="list">${cands.map(t=>`<button class="row" type="button" data-cand="${esc(t.id)}">${bb(t.b,1)}<div><div class="t1">${esc(t.t)}</div><div class="t2">${dfmt(t.d)}</div></div><div class="amt pos num">${fmt(t.a,true)}</div></button>`).join('')}</div>`:''}
   <div class="field" style="margin-top:14px"><label for="pn">Атын өзгерту</label><div style="display:flex;gap:8px"><input class="input" id="pn" value="${esc(name)}" style="flex:1"><button class="btn sec" type="button" id="pren">Өзгерту</button></div></div>
   <div class="acts"><button class="btn sec" type="button" data-close>Жабу</button></div>`,el=>{
     el.querySelector('[data-close]').onclick=closeSheet;
     el.querySelector('#pren').onclick=()=>{const v=el.querySelector('#pn').value.trim();if(!v)return;items.forEach(x=>x.p.name=v);saveBook();closeSheet();render();toast('Аты өзгерді')};
     el.querySelectorAll('[data-pay]').forEach(b=>b.onclick=()=>{const x=items[+b.dataset.pay];payForm(x.c,x.p)});
+    el.querySelectorAll('[data-unpay]').forEach(b=>b.onclick=()=>{const [i,j]=b.dataset.unpay.split(':').map(Number);const cid=items[i].c.id,pi=items[i].c.people.indexOf(items[i].p);undoable('Қайтарым өшірілді',()=>{S.book.claims.find(x=>x.id===cid).people[pi].paid.splice(j,1)});personSheet(name)});
     el.querySelectorAll('[data-cand]').forEach(b=>b.onclick=()=>{const t=TXI[b.dataset.cand];let amt=t.a;for(const x of items){const l=x.p.amount-sum(x.p.paid);if(l<1||amt<1)continue;const take=Math.min(l,amt);x.p.paid.push({d:t.d,a:take,via:t.b,txId:t.id});amt-=take}saveBook();linkIndex();closeSheet();render();toast('Қайтарым тіркелді')});})}
 function payForm(c,p){const l=p.amount-sum(p.paid);
   openSheet(`<h3>${esc(p.name)} қайтарды</h3><div class="sub">${esc(c.title)} · қалғаны ${fmt(l,false)}</div>
@@ -707,10 +735,27 @@ function payForm(c,p){const l=p.amount-sum(p.paid);
     el.querySelector('#psave').onclick=()=>{const a=num(el.querySelector('#pa').value);if(a<=0)return;p.paid.push({d:el.querySelector('#pd').value||todayISO(),a,via:el.querySelector('#pv').value});saveBook();closeSheet();render();toast('Тіркелді')}})}
 function claimSheet(id){const c=S.book.claims.find(x=>x.id===id);if(!c)return;
   openSheet(`<h3>${esc(c.title)}</h3><div class="sub">${dfmt(c.date)} · ${c.type}${c.txIds.length?' · '+c.txIds.map(i=>TXI[i]?fmt(TXI[i].a,true)+' '+BANKS[TXI[i].b].short:'').join(', '):''}</div>
-  <div class="list">${c.people.map((p,i)=>{const l=p.amount-sum(p.paid);return `<div class="row"><span class="ring" style="--p:${Math.round((p.amount-l)/p.amount*100)};--c:${l<1?'var(--pos)':'var(--warn)'}" data-l="${Math.round((p.amount-l)/p.amount*100)}%"></span><div><div class="t1">${esc(p.name)}</div><div class="t2">${fmt(p.amount,false)}${p.paid.map(q=>' · '+dshort(q.d)+' '+(q.via==='C'?'қолма-қол':BANKS[q.via].short)).join('')}</div></div><div>${l<1?'<span class="pill p-pos">Қайтарды</span>':`<button class="btn sm" type="button" data-pay="${i}">Қайтарды</button>`}</div></div>`}).join('')}</div>
-  <div class="acts"><button class="btn danger" type="button" id="cdel">Жазбаны өшіру</button><button class="btn sec" type="button" data-close>Жабу</button></div>`,el=>{el.querySelector('[data-close]').onclick=closeSheet;
+  <div class="list">${c.people.map((p,i)=>{const l=p.amount-sum(p.paid);return `<div class="row"><span class="ring" style="--p:${Math.round((p.amount-l)/p.amount*100)};--c:${l<1?'var(--pos)':'var(--warn)'}" data-l="${Math.round((p.amount-l)/p.amount*100)}%"></span><div><div class="t1">${esc(p.name)}</div><div class="t2">${fmt(p.amount,false)}</div>${p.paid.map((q,j)=>`<div class="paidl"><span class="tag pos">+${fmt(q.a,false)} · ${dshort(q.d)} · ${viaName(q.via)}</span><button class="xbtn" type="button" data-unpay="${i}:${j}" aria-label="Қайтарымды өшіру">×</button></div>`).join('')}</div><div>${l<1?'<span class="pill p-pos">Қайтарды</span>':`<button class="btn sm" type="button" data-pay="${i}">Қайтарды</button>`}</div></div>`}).join('')}</div>
+  <div class="acts"><button class="btn danger" type="button" id="cdel">Өшіру</button><button class="btn sec" type="button" id="cedit">Өзгерту</button><button class="btn sec" type="button" data-close>Жабу</button></div>`,el=>{el.querySelector('[data-close]').onclick=closeSheet;
     el.querySelectorAll('[data-pay]').forEach(b=>b.onclick=()=>payForm(c,c.people[+b.dataset.pay]));
-    el.querySelector('#cdel').onclick=()=>{if(el.querySelector('#cdel').dataset.sure){S.book.claims=S.book.claims.filter(x=>x!==c);saveBook();linkIndex();closeSheet();render();toast('Өшірілді')}else{el.querySelector('#cdel').dataset.sure=1;el.querySelector('#cdel').textContent='Иә, өшіру'}}})}
+    el.querySelectorAll('[data-unpay]').forEach(b=>b.onclick=()=>{const [i,j]=b.dataset.unpay.split(':').map(Number);undoable('Қайтарым өшірілді',()=>{S.book.claims.find(x=>x.id===id).people[i].paid.splice(j,1)});claimSheet(id)});
+    el.querySelector('#cedit').onclick=()=>claimEdit(id);
+    el.querySelector('#cdel').onclick=()=>{closeSheet();undoable('Жазба өшірілді',()=>{S.book.claims=S.book.claims.filter(x=>x.id!==id)})}})}
+function claimEdit(id){const c=S.book.claims.find(x=>x.id===id);if(!c)return;const ppl=c.people.map(p=>({name:p.name,amount:p.amount,paid:p.paid}));
+  openSheet(`<h3>Жазбаны өзгерту</h3><div class="sub">Қате жазылғанын түзетіңіз</div>
+  <div class="seg" id="et" style="margin-bottom:12px">${['Кафе','Жол','Қарыз','Басқа'].map(k=>`<button type="button" data-t="${k}" aria-pressed="${k===c.type}">${k}</button>`).join('')}</div>
+  <div class="fgrid"><div class="field"><label for="etl">Атауы</label><input class="input" id="etl" value="${esc(c.title)}"></div><div class="field"><label for="edt">Күні</label><input class="input" id="edt" type="date" value="${c.date}"></div></div>
+  <div class="field" style="margin-top:12px"><label>Адамдар және сомалар</label><div id="epl"></div><button class="btn sec sm" type="button" id="eadd" style="margin-top:8px;align-self:flex-start">+ Адам қосу</button></div>
+  <div class="acts"><button class="btn sec" type="button" id="eback">Болдырмау</button><button class="btn" type="button" id="esv">Сақтау</button></div>`,el=>{let type=c.type;
+    const draw=()=>{el.querySelector('#epl').innerHTML=ppl.map((p,i)=>`<div style="display:grid;grid-template-columns:1fr 110px 30px;gap:8px;margin-top:8px;align-items:center"><input class="input en" data-i="${i}" value="${esc(p.name)}"><input class="input ea" data-i="${i}" inputmode="decimal" value="${p.amount}"><button class="xbtn" type="button" data-rm="${i}" aria-label="Адамды алып тастау">×</button></div>`).join('');
+      el.querySelectorAll('.en').forEach(x=>x.oninput=()=>ppl[+x.dataset.i].name=x.value);el.querySelectorAll('.ea').forEach(x=>x.oninput=()=>ppl[+x.dataset.i].amount=num(x.value));
+      el.querySelectorAll('[data-rm]').forEach(x=>x.onclick=()=>{ppl.splice(+x.dataset.rm,1);draw()})};draw();
+    el.querySelector('#et').onclick=e=>{const b=e.target.closest('button');if(!b)return;type=b.dataset.t;el.querySelectorAll('#et button').forEach(x=>x.setAttribute('aria-pressed',x===b))};
+    el.querySelector('#eadd').onclick=()=>{ppl.push({name:'',amount:0,paid:[]});draw()};
+    el.querySelector('#eback').onclick=()=>claimSheet(id);
+    el.querySelector('#esv').onclick=()=>{const ok=ppl.filter(p=>p.name.trim()&&p.amount>0);if(!ok.length){toast('Кем дегенде бір адам керек');return}
+      undoable('Өзгертілді',()=>{const cc=S.book.claims.find(x=>x.id===id);cc.type=type;cc.title=el.querySelector('#etl').value.trim()||type;cc.date=el.querySelector('#edt').value||cc.date;cc.people=ok.map(p=>({name:p.name.trim(),amount:Math.round(p.amount),paid:p.paid||[]}))});claimSheet(id)}})}
+
 function repayPick(t){const open=[];S.book.claims.forEach(c=>c.people.forEach(p=>{const l=p.amount-sum(p.paid);if(l>=1)open.push({c,p,l})}));
   openSheet(`<h3>Қай қарыз қайтарылды?</h3><div class="sub">${esc(t.t)} · ${fmt(t.a,true)} · ${dfmt(t.d)}</div>${open.length?`<div class="list">${open.map((x,i)=>`<button class="row" type="button" data-i="${i}"><span class="bb s" style="background:var(--accent)">${x.c.type[0]}</span><div><div class="t1">${esc(x.p.name)}</div><div class="t2">${esc(x.c.title)} · ${dfmt(x.c.date)}</div></div><div class="amt num">${fmt(x.l,false)}</div></button>`).join('')}</div>`:'<div class="empty">Ашық жазба жоқ</div>'}<div class="acts"><button class="btn sec" type="button" data-close>Болдырмау</button></div>`,el=>{el.querySelector('[data-close]').onclick=closeSheet;
     el.querySelectorAll('[data-i]').forEach(b=>b.onclick=()=>{const x=open[+b.dataset.i];x.p.paid.push({d:t.d,a:Math.min(t.a,x.l),via:t.b,txId:t.id});saveBook();linkIndex();closeSheet();render();toast('Қайтарым тіркелді')})})}
@@ -730,7 +775,7 @@ function vFunds(){const A=S.book.aylyq,st=aylyqStats();const ms=aylyqMonths();co
    return `<tr><td class="nm"><button type="button" data-member="${p.id}" style="border:0;background:none;padding:0;text-align:left;font-weight:500">${esc(p.name)}<small>${fmt(p.share,false)}</small></button></td>${cells}<td class="num ${debt?'crit':'muted'}" style="font-weight:600">${debt?fmtc(debt):'—'}</td></tr>`}).join('')}
   <tr><td class="nm" style="font-weight:700">Барлығы</td>${ms.map(m=>`<td class="num" style="font-size:12px;font-weight:600">${fmtc(Object.values(A.paid[m]||{}).reduce((s,v)=>s+num(v),0))}</td>`).join('')}<td></td></tr></tbody></table></div>
   <div class="tools" style="margin-top:12px"><button class="btn sec sm" type="button" id="addMember">+ Адам қосу</button><span class="note" style="margin:0">Жасыл: толық берді · сары: жартылай · қызыл: өткен айда бермеген</span></div></div>
-  ${A.payouts.length?`<div class="card"><h2>Айлықтан берілгені</h2><div class="list">${A.payouts.map(p=>`<div class="row">${bb(p.via||'C',1)}<div><div class="t1">${esc(p.title)}</div><div class="t2">${dfmt(p.d)}</div></div><div class="amt num">${fmt(-p.a,true)}</div></div>`).join('')}</div></div>`:''}`
+  ${A.payouts.length?`<div class="card"><h2>Айлықтан берілгені</h2><div class="list">${A.payouts.map(p=>`<div class="row">${bb(p.via||'C',1)}<div><div class="t1">${esc(p.title)}</div><div class="t2">${dfmt(p.d)}</div></div><div style="display:flex;gap:8px;align-items:center"><b class="num">${fmt(-p.a,true)}</b><button class="xbtn" type="button" data-podel="${p.id}" aria-label="Өшіру">×</button></div></div>`).join('')}</div></div>`:''}`
   :`<div class="tools"><button class="btn" type="button" id="newEvent">${ico('plus')}Жаңа іс-шара</button></div>
   ${ev.length?`<div class="grid g2">${ev.slice().sort((a,b)=>b.date.localeCompare(a.date)).map(e=>{const s=eventStats(e);return `<button class="card" type="button" data-event="${e.id}"><div style="display:flex;justify-content:space-between;gap:10px;align-items:flex-start"><div><b style="font-size:16px">${esc(e.name)}</b><div class="muted" style="font-size:13px">${dfmt(e.date)} · ${e.items.length} жазба</div></div><span class="pill ${s.left>0.5?'p-pos':s.left<-0.5?'p-crit':'p-mute'}">${s.left>0.5?'Ақша сақталуда':s.left<-0.5?'Артық жұмсалды':'Жабылды'}</span></div>
   <div class="grid g3" style="margin-top:14px;gap:8px"><div><div class="label">Жиналды</div><b class="num">${fmtc(s.i)}</b></div><div><div class="label">Жұмсалды</div><b class="num">${fmtc(s.o)}</b></div><div><div class="label">Қалды</div><b class="num ${s.left<0?'crit':'pos'}">${fmtc(s.left)}</b></div></div>
@@ -738,6 +783,7 @@ function vFunds(){const A=S.book.aylyq,st=aylyqStats();const ms=aylyqMonths();co
 function bindFunds(el){const fv=el.querySelector('#fv');fv.onclick=e=>{const b=e.target.closest('button');if(!b)return;FV=b.dataset.v;render()};
   el.querySelectorAll('[data-m]').forEach(b=>b.onclick=()=>aylyqCell(b.dataset.m,b.dataset.p));
   const po=el.querySelector('#payout');if(po)po.onclick=payoutForm;
+  el.querySelectorAll('[data-podel]').forEach(b=>b.onclick=()=>undoable('Өшірілді',()=>{S.book.aylyq.payouts=S.book.aylyq.payouts.filter(x=>x.id!==b.dataset.podel)}));
   const am=el.querySelector('#addMember');if(am)am.onclick=()=>memberForm();
   el.querySelectorAll('[data-member]').forEach(b=>b.onclick=()=>memberForm(b.dataset.member));
   const ne=el.querySelector('#newEvent');if(ne)ne.onclick=()=>eventForm();
@@ -758,7 +804,7 @@ function memberForm(id){const A=S.book.aylyq;const p=id?A.members.find(x=>x.id==
   openSheet(`<h3>${id?'Адамды өзгерту':'Жаңа адам'}</h3><div class="fgrid" style="margin-top:10px"><div class="field"><label for="mn">Аты</label><input class="input" id="mn" value="${esc(p.name)}"></div><div class="field"><label for="ms">Айлық үлесі</label><input class="input" id="ms" inputmode="decimal" value="${p.share}"></div></div>
   <div class="acts">${id?'<button class="btn danger" type="button" id="mdel">Тізімнен шығару</button>':''}<button class="btn" type="button" id="msave">Сақтау</button></div>`,el=>{
     el.querySelector('#msave').onclick=()=>{const n=el.querySelector('#mn').value.trim(),s=num(el.querySelector('#ms').value);if(!n||!s)return;if(id){p.name=n;p.share=s}else A.members.push({id:uid(),name:n,share:s});saveBook();closeSheet();render()};
-    const d=el.querySelector('#mdel');if(d)d.onclick=()=>{if(d.dataset.sure){A.members=A.members.filter(x=>x.id!==id);saveBook();closeSheet();render()}else{d.dataset.sure=1;d.textContent='Иә, шығару'}}})}
+    const d=el.querySelector('#mdel');if(d)d.onclick=()=>{closeSheet();undoable('Тізімнен шығарылды',()=>{S.book.aylyq.members=S.book.aylyq.members.filter(x=>x.id!==id)})}})}
 function payoutForm(){openSheet(`<h3>Айлықтан ақша беру</h3><div class="sub">Кімге берілгенін жазыңыз</div><div class="fgrid"><div class="field"><label for="pt">Кімге / не үшін</label><input class="input" id="pt"></div><div class="field"><label for="pa2">Сома</label><input class="input" id="pa2" inputmode="decimal"></div><div class="field"><label for="pd2">Күні</label><input class="input" id="pd2" type="date" value="${todayISO()}"></div><div class="field"><label for="pv2">Қалай</label>${viaSel('pv2','C')}</div></div><div class="acts"><button class="btn sec" type="button" data-close>Болдырмау</button><button class="btn" type="button" id="posave">Сақтау</button></div>`,el=>{el.querySelector('[data-close]').onclick=closeSheet;
   el.querySelector('#posave').onclick=()=>{const a=num(el.querySelector('#pa2').value);if(a<=0)return;S.book.aylyq.payouts.push({id:uid(),d:el.querySelector('#pd2').value,title:el.querySelector('#pt').value.trim()||'Берілді',a,via:el.querySelector('#pv2').value});saveBook();closeSheet();render();toast('Тіркелді')}})}
 function eventForm(){openSheet(`<h3>Жаңа іс-шара</h3><div class="fgrid" style="margin-top:10px"><div class="field"><label for="en">Атауы</label><input class="input" id="en" placeholder="Мысалы: Желтоқсан той"></div><div class="field"><label for="ed">Күні</label><input class="input" id="ed" type="date" value="${todayISO()}"></div></div><div class="acts"><button class="btn sec" type="button" data-close>Болдырмау</button><button class="btn" type="button" id="esave">Құру</button></div>`,el=>{el.querySelector('[data-close]').onclick=closeSheet;
@@ -766,11 +812,14 @@ function eventForm(){openSheet(`<h3>Жаңа іс-шара</h3><div class="fgrid
 function eventSheet(id){const e=S.book.events.find(x=>x.id===id);if(!e)return;const s=eventStats(e);
   openSheet(`<h3>${esc(e.name)}</h3><div class="sub">Жиналды ${fmt(s.i,false)} · жұмсалды ${fmt(s.o,false)} · қалды <b>${fmt(s.left,false)}</b></div>
   <div class="grid g2" style="gap:10px"><button class="btn" type="button" data-add="in">+ Ақша түсті</button><button class="btn sec" type="button" data-add="out">− Ақша жұмсадым</button></div>
-  <div class="list" style="margin-top:12px">${e.items.length?e.items.slice().sort((a,b)=>b.d.localeCompare(a.d)).map(i=>`<div class="row">${bb(i.via||'C',1)}<div><div class="t1">${esc(i.who||(i.dir==='in'?'Түсті':'Жұмсалды'))}</div><div class="t2">${dfmt(i.d)}${i.txId?' · үзіндіден':''}</div></div><div class="amt num ${i.dir==='in'?'pos':''}">${i.dir==='in'?'+':'−'}${fmt(i.a,false)}</div></div>`).join(''):'<div class="empty">Әзірге жазба жоқ</div>'}</div>
+  <div class="list" style="margin-top:12px">${e.items.length?e.items.slice().sort((a,b)=>b.d.localeCompare(a.d)).map(i=>`<div class="row">${bb(i.via||'C',1)}<div><div class="t1">${esc(i.who||(i.dir==='in'?'Түсті':'Жұмсалды'))}</div><div class="t2">${dfmt(i.d)}${i.txId?' · үзіндіден':''}</div></div><div style="display:flex;gap:8px;align-items:center"><b class="num ${i.dir==='in'?'pos':''}">${i.dir==='in'?'+':'−'}${fmt(i.a,false)}</b><button class="xbtn" type="button" data-idel="${i.id}" aria-label="Жазбаны өшіру">×</button></div></div>`).join(''):'<div class="empty">Әзірге жазба жоқ</div>'}</div>
   <p class="note">Картамен түскен не жұмсалған ақшаны «Операциялар» бөлімінде операцияны басып, «Іс-шара ақшасына жатқызу» арқылы да қосуға болады.</p>
+  <div class="field" style="margin-top:14px"><label for="ern">Атауын өзгерту</label><div style="display:flex;gap:8px"><input class="input" id="ern" value="${esc(e.name)}" style="flex:1"><button class="btn sec" type="button" id="erns">Өзгерту</button></div></div>
   <div class="acts"><button class="btn danger" type="button" id="edel">Іс-шараны өшіру</button><button class="btn sec" type="button" data-close>Жабу</button></div>`,el=>{el.querySelector('[data-close]').onclick=closeSheet;
+    el.querySelectorAll('[data-idel]').forEach(b=>b.onclick=()=>{undoable('Жазба өшірілді',()=>{const ee=S.book.events.find(x=>x.id===id);ee.items=ee.items.filter(x=>x.id!==b.dataset.idel)});eventSheet(id)});
+    el.querySelector('#erns').onclick=()=>{const v=el.querySelector('#ern').value.trim();if(!v)return;undoable('Атауы өзгерді',()=>{S.book.events.find(x=>x.id===id).name=v});eventSheet(id)};
     el.querySelectorAll('[data-add]').forEach(b=>b.onclick=()=>eventItemForm(e,b.dataset.add));
-    el.querySelector('#edel').onclick=()=>{const d=el.querySelector('#edel');if(d.dataset.sure){S.book.events=S.book.events.filter(x=>x!==e);saveBook();linkIndex();closeSheet();render()}else{d.dataset.sure=1;d.textContent='Иә, өшіру'}}})}
+    el.querySelector('#edel').onclick=()=>{closeSheet();undoable('Іс-шара өшірілді',()=>{S.book.events=S.book.events.filter(x=>x.id!==id)})}})}
 function eventItemForm(e,dir){openSheet(`<h3>${dir==='in'?'Ақша түсті':'Ақша жұмсадым'}</h3><div class="sub">${esc(e.name)}</div><div class="fgrid"><div class="field"><label for="iw">${dir==='in'?'Кімнен':'Неге'}</label><input class="input" id="iw"></div><div class="field"><label for="ia">Сома</label><input class="input" id="ia" inputmode="decimal"></div><div class="field"><label for="id2">Күні</label><input class="input" id="id2" type="date" value="${todayISO()}"></div><div class="field"><label for="iv">Қалай</label>${viaSel('iv','C')}</div></div><div class="acts"><button class="btn sec" type="button" data-close>Болдырмау</button><button class="btn" type="button" id="isave">Сақтау</button></div>`,el=>{el.querySelector('[data-close]').onclick=()=>eventSheet(e.id);
   el.querySelector('#isave').onclick=()=>{const a=num(el.querySelector('#ia').value);if(a<=0)return;e.items.push({id:uid(),d:el.querySelector('#id2').value||todayISO(),dir,who:el.querySelector('#iw').value.trim(),a,via:el.querySelector('#iv').value});saveBook();render();eventSheet(e.id);toast('Қосылды')}})}
 function eventPick(t){const ev=S.book.events;openSheet(`<h3>Қай іс-шара?</h3><div class="sub">${esc(t.t)} · ${fmt(t.a,true)}</div><div class="list">${ev.map(e=>`<button class="row" type="button" data-e="${e.id}"><span class="bb s" style="background:var(--accent)">${ico('star')}</span><div><div class="t1">${esc(e.name)}</div><div class="t2">${dfmt(e.date)}</div></div><span></span></button>`).join('')}</div><button class="btn sec block" type="button" id="newE" style="margin-top:12px">+ Жаңа іс-шара</button>`,el=>{
@@ -798,7 +847,7 @@ function billSheet(id){const m=BM||curMonth();const b=S.book.bills.find(x=>x.id=
   <div class="fgrid" style="margin-top:12px"><div class="field"><label for="ba">Төленген сома</label><input class="input" id="ba" inputmode="decimal" value="${Math.max(0,b.amount-s.paid)||b.amount}"></div><div class="field"><label for="bd">Күні</label><input class="input" id="bd" type="date" value="${todayISO()}"></div><div class="field"><label for="bv">Қалай</label>${viaSel('bv',b.via)}</div></div>
   <div class="acts">${s.man?'<button class="btn danger" type="button" id="bun">Белгіні алу</button>':''}<button class="btn sec" type="button" id="bedit">Өзгерту</button><button class="btn" type="button" id="bpay">${ico('check')}Төледім</button></div>`,el=>{
     el.querySelector('#bpay').onclick=()=>{const a=num(el.querySelector('#ba').value);if(a<=0)return;S.book.billPaid[m]=S.book.billPaid[m]||{};S.book.billPaid[m][b.id]={a,d:el.querySelector('#bd').value||todayISO(),via:el.querySelector('#bv').value};saveBook();closeSheet();render();toast('Белгіленді')};
-    const un=el.querySelector('#bun');if(un)un.onclick=()=>{delete S.book.billPaid[m][b.id];saveBook();closeSheet();render()};
+    const un=el.querySelector('#bun');if(un)un.onclick=()=>{closeSheet();undoable('Белгі алынды',()=>{delete S.book.billPaid[m][b.id]})};
     el.querySelector('#bedit').onclick=()=>billForm(b.id)})}
 function billForm(id){const b=id?S.book.bills.find(x=>x.id===id):{name:'',amount:'',day:'',via:'C'};
   openSheet(`<h3>${id?'Төлемді өзгерту':'Жаңа міндетті төлем'}</h3><div class="fgrid" style="margin-top:10px"><div class="field"><label for="bn">Атауы</label><input class="input" id="bn" value="${esc(b.name)}"></div><div class="field"><label for="bam">Айына сомасы</label><input class="input" id="bam" inputmode="decimal" value="${b.amount}"></div><div class="field"><label for="bdy">Айдың қай күні</label><input class="input" id="bdy" value="${esc(b.day)}" placeholder="мысалы 10 немесе 8–12"></div><div class="field"><label for="bvv">Қалай төленеді</label>${viaSel('bvv',b.via)}</div>
@@ -807,17 +856,17 @@ function billForm(id){const b=id?S.book.bills.find(x=>x.id===id):{name:'',amount
     el.querySelector('#bsave').onclick=()=>{const o={name:el.querySelector('#bn').value.trim(),amount:num(el.querySelector('#bam').value),day:el.querySelector('#bdy').value.trim(),via:el.querySelector('#bvv').value};if(!o.name||!o.amount)return;const re=el.querySelector('#bre').value.trim();
       o.match=re&&o.via!=='C'?{b:o.via,re:re.replace(/[.*+?^${}()|[\]\\]/g,'\\$&'),amt:b.match&&b.match.re===re?b.match.amt:undefined}:undefined;if(b.match&&re===b.match.re)o.match=b.match;
       if(id)Object.assign(b,o);else S.book.bills.push({id:uid(),...o});saveBook();closeSheet();render()};
-    const d=el.querySelector('#bdel');if(d)d.onclick=()=>{if(d.dataset.sure){S.book.bills=S.book.bills.filter(x=>x.id!==id);saveBook();closeSheet();render()}else{d.dataset.sure=1;d.textContent='Иә, өшіру'}}})}
+    const d=el.querySelector('#bdel');if(d)d.onclick=()=>{closeSheet();undoable('Төлем өшірілді',()=>{S.book.bills=S.book.bills.filter(x=>x.id!==id)})}})}
 function salaryForm(){openSheet(`<h3>Тұрақты жалақы</h3><div class="sub">Ай сайын міндетті түрде түсетін сома. Қосымша ақы мен қайтарымдарды қоспаңыз.</div><div class="field"><label for="sal">Айына</label><input class="input" id="sal" inputmode="decimal" value="${S.book.salary}"></div><div class="acts"><button class="btn" type="button" id="ssave">Сақтау</button></div>`,el=>{el.querySelector('#ssave').onclick=()=>{S.book.salary=num(el.querySelector('#sal').value);saveBook();closeSheet();render()}})}
 
 /* ---- cash ---- */
 function vCash(){const E=cashEntries();const bal=cashBal();const C=S.book.cash;
   return `<div class="grid g21"><div class="card"><div class="label">Қолдағы ақша (есеп бойынша)</div><div class="big" style="font-size:32px;margin:6px 0">${fmt(bal,false)}</div><div class="muted" style="font-size:13.5px">${dfmt(C.start)} күнгі бастапқы сома: ${fmt(C.startAmt,false)}</div>
   <div class="tools" style="margin-top:14px"><button class="btn" type="button" data-cash="in">+ Кірді</button><button class="btn sec" type="button" data-cash="out">− Шықты</button><button class="btn sec" type="button" id="cstart">Қайта санадым</button></div></div>
-  <div class="card"><h2>Қалай есептеледі</h2><p class="muted" style="margin:0;font-size:13.5px">Банкоматтан алған-салғаныңыз үзіндіден өзі қосылады. Айлық, іс-шара, қайтарым және міндетті төлемдерде «Қолма-қол» таңдасаңыз, олар да осында өзі түседі. Қалғанын «Кірді» немесе «Шықты» арқылы жазыңыз.</p></div></div>
-  <div class="card"><h2>Қозғалыс <small>${E.length} жазба</small></h2>${E.length?`<div class="list">${E.map((x,i)=>`<div class="row">${bb('C',1)}<div><div class="t1">${esc(x.title)}</div><div class="t2">${dfmt(x.d)} · <span class="tag ${x.auto?'acc':''}">${x.src}</span></div></div><div class="amt num ${x.a>0?'pos':''}">${fmt(x.a,true)}${!x.auto?`<small><button type="button" data-cdel="${x.id}" style="border:0;background:none;color:var(--crit);padding:0;font-size:12px">өшіру</button></small>`:''}</div></div>`).join('')}</div>`:'<div class="empty"><b>Әзірге қозғалыс жоқ</b>Қолдағы ақшаны санап, «Қайта санадым» батырмасымен бастапқы соманы жазыңыз</div>'}</div>`}
+  <div class="card"><h2>Қалай есептеледі</h2><p class="muted" style="margin:0;font-size:13.5px">Банкоматтан алған-салғаныңыз үзіндіден өзі қосылады. Айлық, іс-шара, қайтарым және міндетті төлемдерде «Қолма-қол» таңдасаңыз, олар да осында өзі түседі. Қалғанын «Кірді» немесе «Шықты» арқылы жазыңыз. Автоматты жазбаны түзету үшін оның өз бөлімінде өшіріңіз.</p></div></div>
+  <div class="card"><h2>Қозғалыс <small>${E.length} жазба</small></h2>${E.length?`<div class="list">${E.map((x,i)=>`<div class="row" style="grid-template-columns:auto 1fr auto ${x.auto?'':'auto'}">${bb('C',1)}<div><div class="t1">${esc(x.title)}</div><div class="t2">${dfmt(x.d)} · <span class="tag ${x.auto?'acc':''}">${x.src}</span></div></div><div class="amt num ${x.a>0?'pos':''}">${fmt(x.a,true)}</div>${!x.auto?`<button class="xbtn" type="button" data-cdel="${x.id}" aria-label="Өшіру">×</button>`:''}</div>`).join('')}</div>`:'<div class="empty"><b>Әзірге қозғалыс жоқ</b>Қолдағы ақшаны санап, «Қайта санадым» батырмасымен бастапқы соманы жазыңыз</div>'}</div>`}
 function bindCash(el){el.querySelectorAll('[data-cash]').forEach(b=>b.onclick=()=>cashForm(b.dataset.cash));el.querySelector('#cstart').onclick=cashStartForm;
-  el.querySelectorAll('[data-cdel]').forEach(b=>b.onclick=()=>{S.book.cash.items=S.book.cash.items.filter(x=>x.id!==b.dataset.cdel);saveBook();render()})}
+  el.querySelectorAll('[data-cdel]').forEach(b=>b.onclick=()=>undoable('Жазба өшірілді',()=>{S.book.cash.items=S.book.cash.items.filter(x=>x.id!==b.dataset.cdel)}))}
 function cashForm(dir){const TY=dir==='in'?['Басқа кіріс','Жалақы (қолма-қол)','Сыйлық']:['Тамақ','Такси','Базар','Басқа шығыс'];
   openSheet(`<h3>Қолма-қол: ${dir==='in'?'кірді':'шықты'}</h3><div class="sub">Айлық, іс-шара, қайтарым үшін тиісті бөлімді қолданыңыз</div><div class="fgrid"><div class="field"><label for="xa">Сома</label><input class="input" id="xa" inputmode="decimal"></div><div class="field"><label for="xd">Күні</label><input class="input" id="xd" type="date" value="${todayISO()}"></div><div class="field" style="grid-column:1/-1"><label for="xt">Сипаттама</label><input class="input" id="xt" list="xtl"><datalist id="xtl">${TY.map(t=>`<option value="${t}">`).join('')}</datalist></div></div><div class="acts"><button class="btn sec" type="button" data-close>Болдырмау</button><button class="btn" type="button" id="xsave">Сақтау</button></div>`,el=>{el.querySelector('[data-close]').onclick=closeSheet;
   el.querySelector('#xsave').onclick=()=>{const a=num(el.querySelector('#xa').value);if(a<=0)return;S.book.cash.items.push({id:uid(),d:el.querySelector('#xd').value||todayISO(),a:dir==='in'?a:-a,title:el.querySelector('#xt').value.trim()||(dir==='in'?'Кірді':'Шықты')});saveBook();closeSheet();render();toast('Жазылды')}})}
@@ -855,12 +904,13 @@ function bindStats(el){el.querySelector('#sp').onclick=e=>{const b=e.target.clos
 
 /* ---- upload ---- */
 let UPLOG=[];
-function vUpload(){const rows=['K','F','H'].map(b=>{const s=S.banks[b];return `<div class="row">${bb(b)}<div><div class="t1">${BANKS[b].name}</div><div class="t2">${s?`${dfmt(s.meta.from)} – ${dfmt(s.meta.to)} · ${s.rows.length} операция${s.meta.card?' · '+esc(s.meta.card):''}`:'Әлі жүктелмеген'}</div></div><div class="amt num">${s?fmt(bankClose(b),false):''}<small>${s?'қалдық':''}</small></div></div>`}).join('');
+function vUpload(){const rows=['K','F','H'].map(b=>{const s=S.banks[b];return `<div class="row">${bb(b)}<div><div class="t1">${BANKS[b].name}</div><div class="t2">${s?`${dfmt(s.meta.from)} – ${dfmt(s.meta.to)} · ${s.rows.length} операция${s.meta.card?' · '+esc(s.meta.card):''}`:'Әлі жүктелмеген'}</div></div><div style="display:flex;gap:10px;align-items:center"><div class="amt num">${s?fmt(bankClose(b),false):''}<small>${s?'қалдық':''}</small></div>${s?`<button class="xbtn" type="button" data-bdel="${b}" aria-label="${BANKS[b].name} үзіндісін өшіру">×</button>`:''}</div></div>`}).join('');
   return `<div class="drop" id="drop">${ico('upload')}<div class="big">Үзінді PDF-терін таңдаңыз</div><div class="muted" style="max-width:46ch">Kaspi, Freedom, Halyk қосымшасынан үзіндіні PDF етіп сақтап, осында жүктеңіз. Үшеуін бірден таңдауға болады. Қай банк екенін қосымша өзі анықтайды.</div><button class="btn" type="button" id="pick">${ico('plus')}PDF таңдау</button></div>
   ${UPLOG.length?`<div class="card"><h2>Нәтиже</h2><div class="list">${UPLOG.map(l=>`<div class="row">${l.b?bb(l.b,1):'<span class="bb s" style="background:var(--crit)">!</span>'}<div><div class="t1">${esc(l.title)}</div><div class="t2">${esc(l.sub)}</div></div><span class="pill ${l.ok?'p-pos':l.warn?'p-warn':'p-crit'}">${l.ok?'Дайын':l.warn?'Тексеріңіз':'Қате'}</span></div>`).join('')}</div></div>`:''}
   <div class="card"><h2>Жүктелген үзінділер</h2><div class="list">${rows}</div><p class="note">Жаңа үзіндінің кезеңіне түсетін ескі операциялар ауыстырылады. Сондықтан бір кезеңді екі рет жүктесеңіз де, операциялар қайталанбайды. Белгілер, қорлар және қайтарылатын жазбалар сақталады.</p></div>
   <div class="card"><h2>Деректер</h2><div class="sync ${DB?'ok':'local'}" style="margin-bottom:10px"><i></i><span>${DB?'Аккаунтыңызда жеке сақталады: телефонда да, компьютерде де бірдей көрінеді.':'Тек осы құрылғыда сақталады.'}</span></div><div class="tools"><button class="btn sec sm" type="button" id="usd">Доллар бағамы: ${S.book.usdRate} ₸</button></div></div>`}
-function bindUpload(el){const fi=$('#fileIn');el.querySelector('#pick').onclick=()=>fi.click();const dz=el.querySelector('#drop');
+function bindUpload(el){el.querySelectorAll('[data-bdel]').forEach(x=>x.onclick=()=>{const b=x.dataset.bdel;openSheet(`<h3>${BANKS[b].name} үзіндісін өшіру?</h3><div class="sub">Осы банктің барлық операциялары қосымшадан өшеді. Қорлар мен қайтарылатын жазбалар сақталады. Кейін PDF-ті қайта жүктеуге болады.</div><div class="acts"><button class="btn sec" type="button" data-close>Болдырмау</button><button class="btn danger" type="button" id="bdok">Иә, өшіру</button></div>`,s=>{s.querySelector('[data-close]').onclick=closeSheet;s.querySelector('#bdok').onclick=()=>{const snap=S.banks[b];delete S.banks[b];closeSheet();rebuild();render();lsSet();syncBanks(snap,b);toast('Үзінді өшірілді',()=>{S.banks[b]=snap;rebuild();render();lsSet();syncBanks(null,b);toast('Қайтарылды')})}})});
+  const fi=$('#fileIn');el.querySelector('#pick').onclick=()=>fi.click();const dz=el.querySelector('#drop');
   dz.ondragover=e=>{e.preventDefault();dz.classList.add('over')};dz.ondragleave=()=>dz.classList.remove('over');dz.ondrop=e=>{e.preventDefault();dz.classList.remove('over');handleFiles([...e.dataTransfer.files])};
   el.querySelector('#usd').onclick=()=>openSheet(`<h3>Доллар бағамы</h3><div class="sub">Долларлық сатып алуларды теңгеге айналдыру үшін</div><div class="field"><label for="ur">1 $ =</label><input class="input" id="ur" inputmode="decimal" value="${S.book.usdRate}"></div><div class="acts"><button class="btn" type="button" id="usave">Сақтау</button></div>`,s=>{s.querySelector('#usave').onclick=()=>{S.book.usdRate=num(s.querySelector('#ur').value)||445;saveBook();rebuild();closeSheet();render()}})}
 $('#fileIn').addEventListener('change',e=>{handleFiles([...e.target.files]);e.target.value=''});
@@ -899,6 +949,7 @@ function quickAdd(){openSheet(`<h3>Не қосамыз?</h3><div class="sub">Б�
   <button class="opt" type="button" data-q="upload"><span class="oi">${ico('upload')}</span><div><b>Үзінді жүктеу</b><small>Kaspi, Freedom, Halyk PDF</small></div></button>`,el=>{
   el.querySelectorAll('[data-q]').forEach(b=>b.onclick=()=>{const q=b.dataset.q;if(q==='split')claimForm({type:'Кафе'});if(q==='trip')claimForm({type:'Жол'});if(q==='loan')claimForm({type:'Қарыз'});if(q==='event'){closeSheet();FV='events';location.hash='#funds';}if(q==='cashout')cashForm('out');if(q==='upload'){closeSheet();location.hash='#upload';setTimeout(()=>$('#fileIn').click(),50)}})})}
 $('#fab').onclick=quickAdd;
+document.addEventListener('click',e=>{const b=e.target.closest('[data-tx]');if(b&&!b.closest('#sheet'))txSheet(b.dataset.tx);else if(b&&b.closest('#sheet')&&b.classList.contains('row'))txSheet(b.dataset.tx)});
 
 /* ================= render ================= */
 function render(){
@@ -916,7 +967,6 @@ function render(){
   if(view==='stats'){el.innerHTML=vStats();bindStats(el)}
   if(view==='upload'){el.innerHTML=vUpload();bindUpload(el)}
   if(view==='more'){el.innerHTML=vMore();const t=$('#theme2');if(t)t.onclick=toggleTheme}
-  el.querySelectorAll('[data-tx]').forEach(b=>b.onclick=()=>txSheet(b.dataset.tx));
   const sugN=suggestions().length;$$('[data-badge="claims"]').forEach(x=>x.innerHTML=sugN?`<span class="pill p-acc">${sugN}</span>`:'');
 }
 function toggleTheme(){const r=document.documentElement;const dark=r.dataset.theme?r.dataset.theme==='dark':matchMedia('(prefers-color-scheme: dark)').matches;r.dataset.theme=dark?'light':'dark';try{localStorage.setItem('qalta-theme',r.dataset.theme)}catch(e){}}
